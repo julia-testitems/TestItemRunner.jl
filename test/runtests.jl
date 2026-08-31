@@ -98,12 +98,14 @@ end
     finished = run_nested(joinpath(@__DIR__, "..", "testdata", "memory"))
 
     # The second fixture item is the assertion: it collects and then looks at what the
-    # weak reference the first one parked in `Main` still points at. Its verdict is read
-    # from its test set rather than repeated here, because the probe is a binding created
-    # after this test item started running, which this item's world does not have to see.
+    # weak references the first one parked in `Main` still point at, one per binding form
+    # — a plain global and a type annotated one, both of which have to be released, and a
+    # `const`, which cannot be from Julia 1.12 on. Its verdict is read from its test set
+    # rather than repeated here, because the probes are bindings created after this test
+    # item started running, which this item's world does not have to see.
     checks = finished["memory probe: check"].results
 
-    @test length(checks) == 2
+    @test length(checks) == 4
     @test all(i -> i isa Test.Pass, checks)
 end
 

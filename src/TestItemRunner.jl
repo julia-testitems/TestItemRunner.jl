@@ -138,9 +138,21 @@ about that — but its contents do not have to.
 
 Left alone: `eval`, `include` and the module's own name, which the `module` expression
 created rather than the test item, and submodules, because a `@testmodule` reached through
-one is shared with other test items. Bindings that cannot take `nothing` — a `const` on
-Julia before 1.12, a typed global, a name brought in by `using` — are skipped as they come
-up, because there is nothing else to try for them.
+one is shared with other test items.
+
+A global declared with a type, `x::Vector{UInt8} = …`, rejects `nothing`. When such a
+binding holds an array — the case where the memory is worth having back — an empty array of
+the same type is assigned instead, which the declared type does accept.
+
+A name brought in by `using` is skipped: assigning to it throws and there is nothing else to
+try.
+
+A `const` cannot be released from Julia 1.12 on: the assignment is rejected, and redeclaring
+with `const` frees nothing either, because the previous `Core.BindingPartition` goes on
+holding the old value. Before 1.12 the assignment goes through for some values, printing
+`WARNING: redefinition of constant`, and throws for others, so it is not something to rely
+on there either. A test item should bind a large object to a plain global rather than to a
+`const`, or it stays alive for the rest of the process.
 """
 function release_module_globals!(mod::Module)
     for name in names(mod; all=true)
@@ -149,11 +161,24 @@ function release_module_globals!(mod::Module)
         occursin('#', string(name)) && continue
         isdefined(mod, name) || continue
 
+        value = try
+            getfield(mod, name)
+        catch
+            continue
+        end
+
+        value isa Module && continue
+
         try
-            getfield(mod, name) isa Module && continue
             # `Core.eval` rather than `setglobal!`, which only exists from Julia 1.9 on
             Core.eval(mod, Expr(:(=), name, nothing))
         catch
+            value isa Array || continue
+
+            try
+                Core.eval(mod, Expr(:(=), name, similar(value, ntuple(_ -> 0, ndims(value)))))
+            catch
+            end
         end
     end
 
@@ -174,6 +199,20 @@ end
     GC.gc(true)
     GC.gc(true)
     @test weak.value === nothing
+
+    # A type annotated global rejects `nothing`, so the array behind one is dropped by
+    # assigning an empty array of the same type instead. Typed globals are Julia 1.8 and
+    # later, hence the guard, and the declaration is a string for the same reason: this
+    # file is parsed on every version the package supports. That the array this frees is
+    # then really collected is what `testdata/memory` covers, end to end.
+    if VERSION >= v"1.8"
+        typed = Core.eval(Main, :(module $(gensym()) end))
+        Base.include_string(typed, "big::Vector{Int} = zeros(Int, 1_000)\n")
+
+        Base.invokelatest(release_module_globals!, typed)
+
+        @test Base.invokelatest(getfield, typed, :big) == Int[]
+    end
 
     # `eval` and `include` belong to the module rather than to the test item
     @test getfield(mod, :eval) isa Function
