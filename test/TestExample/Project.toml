@@ -1,0 +1,4 @@
+name = "TestExample"
+uuid = "9f783384-2143-4f4a-9096-296dd738060e"
+authors = ["Felix Cremer <fcremer@bgc-jena.mpg.de>"]
+version = "0.1.0"
