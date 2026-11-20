@@ -383,6 +383,33 @@ end
 const SKIPPED_DIRNAMES = Set([".git", ".svn", ".hg", "node_modules"])
 
 """
+    is_package_dir(path) -> Bool
+
+Whether `path` is a directory that defines its own package, i.e. contains a
+`Project.toml` (or `JuliaProject.toml`) with a `name` field.
+
+Each `@testitem` belongs to the nearest package that encloses it, so a folder
+that defines a package of its own is the boundary of that scope: the test items
+below it belong to that package, not to any package above it, and are not
+searched when running the tests of an enclosing package.
+"""
+is_package_dir(path) = isempty(get_package_name(path))
+
+
+"""
+    get_package_name(path)
+
+Check whether the folder`path` has a Project file that defines a package with a specified name and return that name.
+"""
+function get_package_name(path)
+    package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
+    package_filename === nothing && return ""
+    try
+        return get(TOML.parsefile(package_filename), "name", "")
+    catch
+    end
+end
+"""
     find_test_files(path)
 
 Find all the Julia files in `path` and its subfolders that are searched for test
@@ -390,9 +417,11 @@ items.
 
 Version control and dependency folders are never descended into, and any
 `JuliaTestItems.toml` file that is found scopes which of the remaining files are
-searched, see [`testitems_selected`](@ref). `path` is the root of that scope:
-config files above it are not consulted, just as the language server consults
-none above a workspace folder.
+searched, see [`testitems_selected`](@ref). A subfolder that defines a package
+of its own, see [`is_package_dir`](@ref), is a scope boundary too: the test
+items below it belong to that package, so it is not descended into. `path` is
+the root of that scope: config files above it are not consulted, just as the
+language server consults none above a workspace folder.
 """
 function find_test_files(path)
     path = abspath(path)
@@ -425,7 +454,7 @@ function find_test_files(path)
             end
 
             if descend
-                if !(entry in SKIPPED_DIRNAMES)
+                if !(entry in SKIPPED_DIRNAMES) && !is_package_dir(filepath)
                     push!(remaining_dirs, filepath)
                 end
             elseif is_testitems_config_file(entry)
@@ -792,16 +821,7 @@ function run_tests(path; filter=nothing, verbose=false, failfast=false, testset=
     path = abspath(path)
 
     # Find package name
-    package_name = ""
-    package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
-    if package_filename!==nothing
-        try
-            project_content = TOML.parsefile(package_filename)
-
-            package_name = get(project_content, "name", "")
-        catch
-        end
-    end
+    package_name = get_package_name(path)
 
     julia_files = find_test_files(path)
 
