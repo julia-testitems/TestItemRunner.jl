@@ -23,7 +23,7 @@ module TestItemDetection
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
 
-import Test, TestItems, TOML
+import Test, TestItems, TOML, Pkg
 using TestItems: @testitem, @testmodule, @testsnippet
 
 include("vendored_code.jl")
@@ -393,21 +393,27 @@ that defines a package of its own is the boundary of that scope: the test items
 below it belong to that package, not to any package above it, and are not
 searched when running the tests of an enclosing package.
 """
-is_package_dir(path) = isempty(get_package_name(path))
-
-
-"""
-    get_package_name(path)
-
-Check whether the folder`path` has a Project file that defines a package with a specified name and return that name.
-"""
-function get_package_name(path)
-    package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
-    package_filename === nothing && return ""
-    try
-        return get(TOML.parsefile(package_filename), "name", "")
-    catch
+function is_package_dir(path)
+    for projectname in Base.project_names
+        try
+            Pkg.Types.read_package(joinpath(path, projectname))
+            return true
+        catch 
+        end
     end
+    return true
+end
+"""
+    get_project_name(path)
+
+Check whether the folder`path` defines a Project with a specified name and return that name.
+"""
+function get_project_name(path)
+    projectfile  = Pkg.Types.projectfile_path(path, strict=true)
+    projectfile === nothing && return ""
+    project = Pkg.Types.read_project(projectfile)
+    name = project.name
+    return isnothing(name) ? "" : name
 end
 """
     find_test_files(path)
@@ -821,7 +827,7 @@ function run_tests(path; filter=nothing, verbose=false, failfast=false, testset=
     path = abspath(path)
 
     # Find package name
-    package_name = get_package_name(path)
+    package_name = get_project_name(path)
 
     julia_files = find_test_files(path)
 
